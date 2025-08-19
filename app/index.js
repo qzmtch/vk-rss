@@ -4,9 +4,6 @@ const iconv = require("iconv-lite");
 
 const app = express();
 
-
-
-
 async function vkRequest(oid) {
   const response = await axios.post(
     "https://vk.com/al_video.php?act=load_videos_silent",
@@ -33,18 +30,12 @@ async function vkRequest(oid) {
   return JSON.parse(decoded);
 }
 
-function generateRSS(oid, videos, limit = 10) {
-  const items = videos.slice(0, limit).map(v => {
-    const title = v[3];
-    const link = "https://vk.com" + v[20];
-    const pubDate = new Date(v[9] * 1000).toUTCString();
-    const thumb = v[2];
 // Декодируем HTML сущности
 function decodeHTMLEntities(str) {
   if (!str) return "";
   return str
-    .replace(/&#(\d+);/g, (m, code) => String.fromCharCode(code)) // &#123;
-    .replace(/&#x([0-9a-fA-F]+);/g, (m, code) => String.fromCharCode(parseInt(code, 16))) // &#x1F60D;
+    .replace(/&#(\d+);/g, (m, code) => String.fromCharCode(code))
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&")
@@ -52,39 +43,55 @@ function decodeHTMLEntities(str) {
     .replace(/&gt;/g, ">");
 }
 
-// Экранируем уже нормальный текст для XML (без удвоений)
-function escapeXML(str) {
-  if (!str) return "";
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-// Если используем CDATA, то экранируем только закрывающий тег
+// Экранируем только закрывающий тег CDATA
 function escapeCDATA(str) {
   if (!str) return "";
   return str.replace(/\]\]>/g, "]]&gt;");
 }
-const cleanTitle = decodeHTMLEntities(title);
+
+// Экранируем URL (чтобы & превращались в &amp;)
+function escapeURL(url) {
+  if (!url) return "";
+  return url.replace(/&/g, "&amp;");
+}
+
+// Вытаскиваем имя автора из html <a ...>Author</a>
+function extractAuthor(html) {
+  if (!html) return "Unknown";
+  const match = html.match(/>([^<]+)<\/a>/);
+  return match ? match[1].trim() : "Unknown";
+}
+
+function generateRSS(oid, videos, limit = 10) {
+  const firstAuthorHtml = videos[0]?.[8] || "";
+  const channelTitle = extractAuthor(firstAuthorHtml) || `VK Videos ${oid}`;
+  const channelLink = videos[0]?.[39] ? videos[0][39] : `https://vk.com/videos${oid}`;
+
+  const items = videos.slice(0, limit).map(v => {
+    const title = v[3];
+    const link = "https://vk.com" + v[20];
+    const pubDate = new Date(v[9] * 1000).toUTCString();
+    const thumb = v[2];
+
+    const cleanTitle = decodeHTMLEntities(title);
+    const safeThumb = escapeURL(thumb);
+
     return `
       <item>
         <title><![CDATA[${escapeCDATA(cleanTitle)}]]></title>
         <link>${link}</link>
         <pubDate>${pubDate}</pubDate>
-        <enclosure url="${thumb}" type="image/jpeg"/>
+        <description><![CDATA[<img src="${safeThumb}" alt="thumbnail"/>]]></description>
         <guid isPermaLink="false">${oid}_${v[1]}</guid>
       </item>
     `;
   }).join("\n");
 
-  return `<?xml version="1.0" encoding="UTF-8" ?>
+  return `<?xml version="1.0" encoding="UTF-8"?>
   <rss version="2.0">
     <channel>
-      <title>VK Videos ${oid}</title>
-      <link>https://vk.com/videos${oid}</link>
+      <title>${channelTitle}</title>
+      <link>${channelLink}</link>
       <description>RSS feed for VK videos</description>
       <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
       ${items}
