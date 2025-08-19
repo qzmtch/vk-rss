@@ -14,7 +14,8 @@ async function vkRequest(oid) {
       oid: oid,
       rowlen: "3",
       section: "all",
-      snippet_video: "0"
+      snippet_video: "0",
+      limit: "20"
     }).toString(),
     {
       responseType: "arraybuffer",
